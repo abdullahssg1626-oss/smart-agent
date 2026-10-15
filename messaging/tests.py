@@ -177,6 +177,25 @@ class WhatsAppWebhookTests(TestCase):
 
         self.assertEqual(response.status_code, 403)
 
+    @override_settings(WHATSAPP_APP_SECRET='app-secret')
+    @override_settings(VERCEL_DEPLOYMENT=True, DATABASE_URL='')
+    def test_webhook_reports_missing_persistent_database(self):
+        body = b'{}'
+        signature = hmac.new(b'app-secret', body, hashlib.sha256).hexdigest()
+
+        response = self.client.post(
+            '/webhook/whatsapp/',
+            data=body,
+            content_type='application/json',
+            HTTP_X_HUB_SIGNATURE_256=f'sha256={signature}',
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {'error': 'Persistent database is not configured for this deployment.'},
+        )
+
 
 class GroqServiceTests(TransactionTestCase):
     @override_settings(GROQ_API_KEY='')

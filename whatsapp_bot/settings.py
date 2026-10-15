@@ -115,6 +115,7 @@ WSGI_APPLICATION = 'whatsapp_bot.wsgi.application'
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
 DATABASE_URL = os.getenv('DATABASE_URL')
+VERCEL_DEPLOYMENT = bool(os.getenv('VERCEL'))
 if DATABASE_URL:
     DATABASES = {
         'default': dj_database_url.parse(
@@ -123,10 +124,6 @@ if DATABASE_URL:
             ssl_require=not DEBUG,
         ),
     }
-elif os.getenv('VERCEL'):
-    raise ImproperlyConfigured(
-        'Set DATABASE_URL to a persistent PostgreSQL database for Vercel deployments.',
-    )
 else:
     DATABASES = {
         'default': {

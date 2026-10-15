@@ -55,6 +55,13 @@ def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
     if not _valid_signature(request):
         return JsonResponse({'error': 'Invalid webhook signature.'}, status=403)
 
+    if settings.VERCEL_DEPLOYMENT and not settings.DATABASE_URL:
+        logger.error('WhatsApp webhook is unavailable because DATABASE_URL is missing.')
+        return JsonResponse(
+            {'error': 'Persistent database is not configured for this deployment.'},
+            status=503,
+        )
+
     try:
         payload = json.loads(request.body)
     except (UnicodeDecodeError, json.JSONDecodeError):
