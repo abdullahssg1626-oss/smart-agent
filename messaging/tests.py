@@ -18,6 +18,19 @@ from .services import (
 
 
 class WhatsAppWebhookTests(TestCase):
+    def test_home_page_reports_service_status_and_webhook_path(self):
+        response = self.client.get('/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                'status': 'ok',
+                'service': 'whatsapp-business-agent',
+                'webhook': '/webhook/whatsapp/',
+            },
+        )
+
     @override_settings(WHATSAPP_VERIFY_TOKEN='verify-me')
     def test_meta_verification_returns_challenge(self):
         response = self.client.get(
