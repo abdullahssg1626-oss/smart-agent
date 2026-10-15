@@ -1,0 +1,2 @@
+[tool.vercel]
+entrypoint = "whatsapp_bot.wsgi:application"

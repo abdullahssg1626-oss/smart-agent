@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "whatsapp_bot/wsgi.py": {
+      "maxDuration": 60
+    }
+  }
+}
