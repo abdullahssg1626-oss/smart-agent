@@ -1,2 +1,14 @@
+[project]
+name = "whatsapp-business-agent"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "Django>=6.1,<6.2",
+    "python-dotenv>=1.0,<2.0",
+    "dj-database-url>=2.2,<3.0",
+    "psycopg[binary]>=3.2,<4.0",
+    "langchain-groq>=1.0,<2.0",
+]
+
 [tool.vercel]
 entrypoint = "whatsapp_bot.wsgi:application"
