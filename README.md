@@ -45,6 +45,25 @@ The bridge's `/health` endpoint reports whether its WhatsApp connection is
 open. Django's incoming endpoint is `/webhook/baileys/`; it only accepts
 requests authenticated with the shared bearer token.
 
+## Deploy the free Render setup
+
+1. Push the repository to GitHub and select **New → Blueprint** in Render.
+   Connect the repository and let Render read the root `render.yaml`.
+2. Enter your `GROQ_API_KEY` when prompted, then create the Blueprint. It
+   creates the Django web service, public Baileys bridge, shared random bridge
+   token, and a free PostgreSQL database in Oregon.
+3. Open the `whatsapp-baileys` service logs and scan its QR code with WhatsApp
+   linked-device settings. The bridge calls Django at its Render URL and Django
+   sends replies back to the bridge.
+
+This free configuration is for testing, not reliable always-on use. Render
+free web services spin down after 15 minutes without inbound traffic and have
+ephemeral filesystems. The Baileys service can disconnect while asleep, and its
+WhatsApp login files can be lost when it restarts, so you may need to scan a
+new QR code. The free PostgreSQL database expires after 30 days; upgrade it
+before expiry to retain conversation history. Do not rely on this setup for
+production messaging.
+
 ## Production deployment
 
 Run the Baileys bridge as a persistent Node.js service with a persistent volume

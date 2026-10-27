@@ -1,0 +1,65 @@
+envVarGroups:
+  - name: whatsapp-bridge-auth
+    envVars:
+      - key: WHATSAPP_BRIDGE_TOKEN
+        generateValue: true
+
+databases:
+  - name: whatsapp-agent-db
+    databaseName: whatsapp_agent
+    user: whatsapp_agent
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: whatsapp-agent
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python manage.py migrate --noinput && gunicorn whatsapp_bot.wsgi:application --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+    healthCheckPath: /
+    envVars:
+      - key: DJANGO_SECRET_KEY
+        generateValue: true
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: DJANGO_ALLOWED_HOSTS
+        fromService:
+          type: web
+          name: whatsapp-agent
+          property: host
+      - key: DATABASE_URL
+        fromDatabase:
+          name: whatsapp-agent-db
+          property: connectionString
+      - key: WHATSAPP_BRIDGE_URL
+        fromService:
+          type: web
+          name: whatsapp-baileys
+          property: host
+      - fromGroup: whatsapp-bridge-auth
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.3-70b-versatile
+
+  - type: web
+    name: whatsapp-baileys
+    runtime: node
+    rootDir: baileys_bridge
+    plan: free
+    region: oregon
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - fromGroup: whatsapp-bridge-auth
+      - key: DJANGO_WEBHOOK_URL
+        fromService:
+          type: web
+          name: whatsapp-agent
+          property: host
+      - key: AUTH_DIRECTORY
+        value: auth_info

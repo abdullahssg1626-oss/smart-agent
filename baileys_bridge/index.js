@@ -10,7 +10,14 @@ const makeWASocket = baileys.default;
 const { DisconnectReason, useMultiFileAuthState } = baileys;
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const token = process.env.WHATSAPP_BRIDGE_TOKEN || '';
-const djangoWebhookUrl = process.env.DJANGO_WEBHOOK_URL || '';
+const djangoWebhookSetting = process.env.DJANGO_WEBHOOK_URL || '';
+const djangoWebhookUrl = djangoWebhookSetting
+  ? new URL(
+    /^https?:\/\//i.test(djangoWebhookSetting)
+      ? djangoWebhookSetting
+      : `https://${djangoWebhookSetting}`,
+  )
+  : null;
 const authDirectory = path.resolve(__dirname, process.env.AUTH_DIRECTORY || 'auth_info');
 const port = Number(process.env.PORT || 3001);
 const host = process.env.HOST || '0.0.0.0';
@@ -21,6 +28,9 @@ let reconnectTimer;
 
 if (!token || !djangoWebhookUrl || !Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('Set WHATSAPP_BRIDGE_TOKEN, DJANGO_WEBHOOK_URL, and a valid PORT.');
+}
+if (djangoWebhookUrl.pathname === '/') {
+  djangoWebhookUrl.pathname = '/webhook/baileys/';
 }
 
 function isAuthorized(request) {

@@ -218,3 +218,16 @@ class GroqServiceTests(TransactionTestCase):
             {'to': '15551234567', 'message': 'Hello!'},
         )
         self.assertEqual(post_mock.call_args.args[2], 'bridge-secret')
+
+    @override_settings(
+        WHATSAPP_BRIDGE_URL='baileys-bridge.onrender.com',
+        WHATSAPP_BRIDGE_TOKEN='bridge-secret',
+    )
+    @patch('messaging.services._post_json')
+    def test_send_whatsapp_message_uses_https_for_render_hostname(self, post_mock):
+        send_whatsapp_message('15551234567', 'Hello!')
+
+        self.assertEqual(
+            post_mock.call_args.args[0],
+            'https://baileys-bridge.onrender.com/messages',
+        )

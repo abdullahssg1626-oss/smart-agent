@@ -90,8 +90,11 @@ def generate_reply(conversation: Conversation, turn: ConversationTurn) -> str:
 def send_whatsapp_message(recipient: str, message: str) -> None:
     if not settings.WHATSAPP_BRIDGE_URL or not settings.WHATSAPP_BRIDGE_TOKEN:
         raise IntegrationError('WhatsApp Baileys bridge is not configured.')
+    bridge_url = settings.WHATSAPP_BRIDGE_URL.rstrip('/')
+    if not bridge_url.startswith(('http://', 'https://')):
+        bridge_url = f'https://{bridge_url}'
     _post_json(
-        f'{settings.WHATSAPP_BRIDGE_URL.rstrip("/")}/messages',
+        f'{bridge_url}/messages',
         {'to': recipient, 'message': message[:4096]},
         settings.WHATSAPP_BRIDGE_TOKEN,
     )
