@@ -1,4 +1,3 @@
-import hashlib
 import hmac
 import json
 import logging
@@ -22,38 +21,15 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 
-def _valid_signature(request: HttpRequest) -> bool:
-    app_secret = settings.WHATSAPP_APP_SECRET
-    signature = request.headers.get('X-Hub-Signature-256', '')
-    if not app_secret or not signature.startswith('sha256='):
-        return False
-
-    expected = 'sha256=' + hmac.new(
-        app_secret.encode('utf-8'),
-        request.body,
-        hashlib.sha256,
-    ).hexdigest()
-    return hmac.compare_digest(signature, expected)
-
-
 @csrf_exempt
-@require_http_methods(['GET', 'POST'])
+@require_http_methods(['POST'])
 def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
-    if request.method == 'GET':
-        if not settings.WHATSAPP_VERIFY_TOKEN:
-            return JsonResponse({'error': 'Webhook verification is not configured.'}, status=503)
-        if (
-            request.GET.get('hub.mode') == 'subscribe'
-            and hmac.compare_digest(
-                request.GET.get('hub.verify_token', ''),
-                settings.WHATSAPP_VERIFY_TOKEN,
-            )
-        ):
-            return HttpResponse(request.GET.get('hub.challenge', ''), content_type='text/plain')
-        return JsonResponse({'error': 'Webhook verification failed.'}, status=403)
-
-    if not _valid_signature(request):
-        return JsonResponse({'error': 'Invalid webhook signature.'}, status=403)
+    bridge_token = settings.WHATSAPP_BRIDGE_TOKEN
+    if not bridge_token or not hmac.compare_digest(
+        request.headers.get('Authorization', ''),
+        f'Bearer {bridge_token}',
+    ):
+        return JsonResponse({'error': 'Invalid bridge credentials.'}, status=403)
 
     if settings.VERCEL_DEPLOYMENT and not settings.DATABASE_URL:
         logger.error('WhatsApp webhook is unavailable because DATABASE_URL is missing.')
@@ -124,6 +100,6 @@ def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
             turn.save(update_fields=('status', 'updated_at'))
     except IntegrationError:
         logger.exception('WhatsApp webhook could not process an incoming message.')
-        return JsonResponse({'error': 'Message processing failed; Meta may retry.'}, status=502)
+        return JsonResponse({'error': 'Message processing failed; the bridge may retry.'}, status=502)
 
     return JsonResponse({'status': 'ok'})

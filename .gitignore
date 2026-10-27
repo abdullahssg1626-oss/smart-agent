@@ -4,6 +4,8 @@
 venv/
 .venv/
 .vercel/
+baileys_bridge/node_modules/
+baileys_bridge/auth_info/
 __pycache__/
 *.py[cod]
 db.sqlite3

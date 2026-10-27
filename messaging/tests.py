@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import json
 from unittest.mock import patch
 
@@ -17,7 +15,21 @@ from .services import (
 )
 
 
+@override_settings(WHATSAPP_BRIDGE_TOKEN='bridge-secret')
 class WhatsAppWebhookTests(TestCase):
+    @staticmethod
+    def post_bridge_message(client, message_id='baileys.message-1'):
+        return client.post(
+            '/webhook/baileys/',
+            data=json.dumps({
+                'id': message_id,
+                'from': '15551234567',
+                'text': 'Hi',
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION='Bearer bridge-secret',
+        )
+
     def test_home_page_reports_service_status_and_webhook_path(self):
         response = self.client.get('/')
 
@@ -27,62 +39,23 @@ class WhatsAppWebhookTests(TestCase):
             {
                 'status': 'ok',
                 'service': 'whatsapp-business-agent',
-                'webhook': '/webhook/whatsapp/',
+                'webhook': '/webhook/baileys/',
             },
         )
 
-    @override_settings(WHATSAPP_VERIFY_TOKEN='verify-me')
-    def test_meta_verification_returns_challenge(self):
-        response = self.client.get(
-            '/webhook/whatsapp/',
-            {
-                'hub.mode': 'subscribe',
-                'hub.verify_token': 'verify-me',
-                'hub.challenge': 'challenge-value',
-            },
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.content, b'challenge-value')
-
-    @override_settings(WHATSAPP_APP_SECRET='app-secret')
     @patch('messaging.views.send_whatsapp_message')
     @patch('messaging.views.generate_reply', return_value='Hello!')
-    def test_signed_text_message_gets_a_reply(self, generate_reply_mock, send_mock):
-        body = json.dumps(
-            {
-                'entry': [{
-                    'changes': [{
-                        'value': {
-                            'messages': [{
-                                'id': 'wamid.message-1',
-                                'from': '15551234567',
-                                'type': 'text',
-                                'text': {'body': 'Hi'},
-                            }],
-                        },
-                    }],
-                }],
-            },
-        ).encode('utf-8')
-        signature = hmac.new(b'app-secret', body, hashlib.sha256).hexdigest()
-
-        response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
-            content_type='application/json',
-            HTTP_X_HUB_SIGNATURE_256=f'sha256={signature}',
-        )
+    def test_bridge_text_message_gets_a_reply(self, generate_reply_mock, send_mock):
+        response = self.post_bridge_message(self.client)
 
         self.assertEqual(response.status_code, 200)
         generate_reply_mock.assert_called_once()
-        turn = ConversationTurn.objects.get(whatsapp_message_id='wamid.message-1')
+        turn = ConversationTurn.objects.get(whatsapp_message_id='baileys.message-1')
         self.assertEqual(turn.user_message, 'Hi')
         self.assertEqual(turn.assistant_message, 'Hello!')
         self.assertEqual(turn.status, ConversationTurn.Status.REPLIED)
         send_mock.assert_called_once_with('15551234567', 'Hello!')
 
-    @override_settings(WHATSAPP_APP_SECRET='app-secret')
     @patch('messaging.views.send_whatsapp_message')
     @patch('messaging.views.generate_reply', return_value='Hello!')
     def test_duplicate_webhook_message_is_not_answered_twice(
@@ -90,37 +63,8 @@ class WhatsAppWebhookTests(TestCase):
         generate_reply_mock,
         send_mock,
     ):
-        body = json.dumps(
-            {
-                'entry': [{
-                    'changes': [{
-                        'value': {
-                            'messages': [{
-                                'id': 'wamid.duplicate',
-                                'from': '15551234567',
-                                'type': 'text',
-                                'text': {'body': 'Hi'},
-                            }],
-                        },
-                    }],
-                }],
-            },
-        ).encode('utf-8')
-        signature = hmac.new(b'app-secret', body, hashlib.sha256).hexdigest()
-        headers = {'HTTP_X_HUB_SIGNATURE_256': f'sha256={signature}'}
-
-        first_response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
-            content_type='application/json',
-            **headers,
-        )
-        duplicate_response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
-            content_type='application/json',
-            **headers,
-        )
+        first_response = self.post_bridge_message(self.client, 'baileys.duplicate')
+        duplicate_response = self.post_bridge_message(self.client, 'baileys.duplicate')
 
         self.assertEqual(first_response.status_code, 200)
         self.assertEqual(duplicate_response.status_code, 200)
@@ -128,7 +72,6 @@ class WhatsAppWebhookTests(TestCase):
         generate_reply_mock.assert_called_once()
         send_mock.assert_called_once()
 
-    @override_settings(WHATSAPP_APP_SECRET='app-secret')
     @patch(
         'messaging.views.send_whatsapp_message',
         side_effect=[IntegrationError('WhatsApp API unavailable.'), None],
@@ -139,68 +82,34 @@ class WhatsAppWebhookTests(TestCase):
         generate_reply_mock,
         send_mock,
     ):
-        body = json.dumps(
-            {
-                'entry': [{
-                    'changes': [{
-                        'value': {
-                            'messages': [{
-                                'id': 'wamid.retry',
-                                'from': '15551234567',
-                                'type': 'text',
-                                'text': {'body': 'Hi'},
-                            }],
-                        },
-                    }],
-                }],
-            },
-        ).encode('utf-8')
-        signature = hmac.new(b'app-secret', body, hashlib.sha256).hexdigest()
-        headers = {'HTTP_X_HUB_SIGNATURE_256': f'sha256={signature}'}
-
-        failed_response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
-            content_type='application/json',
-            **headers,
-        )
-        retry_response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
-            content_type='application/json',
-            **headers,
-        )
+        failed_response = self.post_bridge_message(self.client, 'baileys.retry')
+        retry_response = self.post_bridge_message(self.client, 'baileys.retry')
 
         self.assertEqual(failed_response.status_code, 502)
         self.assertEqual(retry_response.status_code, 200)
-        turn = ConversationTurn.objects.get(whatsapp_message_id='wamid.retry')
+        turn = ConversationTurn.objects.get(whatsapp_message_id='baileys.retry')
         self.assertEqual(turn.assistant_message, 'Saved reply')
         self.assertEqual(turn.status, ConversationTurn.Status.REPLIED)
         generate_reply_mock.assert_called_once()
         self.assertEqual(send_mock.call_count, 2)
 
-    @override_settings(WHATSAPP_APP_SECRET='app-secret')
-    def test_invalid_signature_is_rejected(self):
+    def test_invalid_bridge_token_is_rejected(self):
         response = self.client.post(
-            '/webhook/whatsapp/',
+            '/webhook/baileys/',
             data='{}',
             content_type='application/json',
-            HTTP_X_HUB_SIGNATURE_256='sha256=invalid',
+            HTTP_AUTHORIZATION='Bearer invalid',
         )
 
         self.assertEqual(response.status_code, 403)
 
-    @override_settings(WHATSAPP_APP_SECRET='app-secret')
     @override_settings(VERCEL_DEPLOYMENT=True, DATABASE_URL='')
     def test_webhook_reports_missing_persistent_database(self):
-        body = b'{}'
-        signature = hmac.new(b'app-secret', body, hashlib.sha256).hexdigest()
-
         response = self.client.post(
-            '/webhook/whatsapp/',
-            data=body,
+            '/webhook/baileys/',
+            data='{}',
             content_type='application/json',
-            HTTP_X_HUB_SIGNATURE_256=f'sha256={signature}',
+            HTTP_AUTHORIZATION='Bearer bridge-secret',
         )
 
         self.assertEqual(response.status_code, 503)
@@ -224,27 +133,21 @@ class GroqServiceTests(TransactionTestCase):
             generate_reply(conversation, turn)
 
     def test_incoming_message_iterator_ignores_non_text_messages(self):
-        payload = {
-            'entry': [{
-                'changes': [{
-                    'value': {
-                        'messages': [
-                            {'from': '15551234567', 'type': 'image'},
-                            {
-                                'id': 'wamid.text',
-                                'from': '15557654321',
-                                'type': 'text',
-                                'text': {'body': '  Help  '},
-                            },
-                        ],
-                    },
-                }],
-            }],
-        }
-
         self.assertEqual(
-            list(iter_incoming_text_messages(payload)),
-            [('15557654321', 'wamid.text', 'Help')],
+            list(iter_incoming_text_messages({
+                'id': 'baileys.text',
+                'from': '15557654321',
+                'text': '  Help  ',
+            })),
+            [('15557654321', 'baileys.text', 'Help')],
+        )
+        self.assertEqual(
+            list(iter_incoming_text_messages({
+                'id': 'baileys.image',
+                'from': '15551234567',
+                'text': '',
+            })),
+            [],
         )
 
     @override_settings(GROQ_API_KEY='groq-key')
@@ -299,26 +202,19 @@ class GroqServiceTests(TransactionTestCase):
         self.assertEqual(history.messages[1].content, 'messages=2')
 
     @override_settings(
-        WHATSAPP_ACCESS_TOKEN='whatsapp-token',
-        WHATSAPP_PHONE_NUMBER_ID='phone-id',
-        WHATSAPP_GRAPH_API_VERSION='v23.0',
+        WHATSAPP_BRIDGE_URL='http://127.0.0.1:3001',
+        WHATSAPP_BRIDGE_TOKEN='bridge-secret',
     )
     @patch('messaging.services._post_json', return_value={'messages': [{'id': 'message-id'}]})
-    def test_send_whatsapp_message_uses_cloud_api(self, post_mock):
+    def test_send_whatsapp_message_uses_baileys_bridge(self, post_mock):
         send_whatsapp_message('15551234567', 'Hello!')
 
         self.assertEqual(
             post_mock.call_args.args[0],
-            'https://graph.facebook.com/v23.0/phone-id/messages',
+            'http://127.0.0.1:3001/messages',
         )
         self.assertEqual(
             post_mock.call_args.args[1],
-            {
-                'messaging_product': 'whatsapp',
-                'recipient_type': 'individual',
-                'to': '15551234567',
-                'type': 'text',
-                'text': {'preview_url': False, 'body': 'Hello!'},
-            },
+            {'to': '15551234567', 'message': 'Hello!'},
         )
-        self.assertEqual(post_mock.call_args.args[2], 'whatsapp-token')
+        self.assertEqual(post_mock.call_args.args[2], 'bridge-secret')

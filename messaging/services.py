@@ -88,61 +88,27 @@ def generate_reply(conversation: Conversation, turn: ConversationTurn) -> str:
 
 
 def send_whatsapp_message(recipient: str, message: str) -> None:
-    if not settings.WHATSAPP_ACCESS_TOKEN or not settings.WHATSAPP_PHONE_NUMBER_ID:
-        raise IntegrationError('WhatsApp access token or phone number ID is not configured.')
-
-    url = (
-        f'https://graph.facebook.com/{settings.WHATSAPP_GRAPH_API_VERSION}/'
-        f'{settings.WHATSAPP_PHONE_NUMBER_ID}/messages'
-    )
+    if not settings.WHATSAPP_BRIDGE_URL or not settings.WHATSAPP_BRIDGE_TOKEN:
+        raise IntegrationError('WhatsApp Baileys bridge is not configured.')
     _post_json(
-        url,
-        {
-            'messaging_product': 'whatsapp',
-            'recipient_type': 'individual',
-            'to': recipient,
-            'type': 'text',
-            'text': {'preview_url': False, 'body': message[:4096]},
-        },
-        settings.WHATSAPP_ACCESS_TOKEN,
+        f'{settings.WHATSAPP_BRIDGE_URL.rstrip("/")}/messages',
+        {'to': recipient, 'message': message[:4096]},
+        settings.WHATSAPP_BRIDGE_TOKEN,
     )
 
 
 def iter_incoming_text_messages(
     payload: dict[str, Any],
 ) -> Iterator[tuple[str, str, str]]:
-    entries = payload.get('entry', [])
-    if not isinstance(entries, list):
-        return
-
-    for entry in entries:
-        if not isinstance(entry, dict):
-            continue
-        changes = entry.get('changes', [])
-        if not isinstance(changes, list):
-            continue
-        for change in changes:
-            if not isinstance(change, dict):
-                continue
-            value = change.get('value', {})
-            if not isinstance(value, dict):
-                continue
-            messages = value.get('messages', [])
-            if not isinstance(messages, list):
-                continue
-            for message in messages:
-                if not isinstance(message, dict) or message.get('type') != 'text':
-                    continue
-                sender = message.get('from')
-                message_id = message.get('id')
-                text = message.get('text')
-                body = text.get('body') if isinstance(text, dict) else None
-                if (
-                    isinstance(sender, str)
-                    and sender
-                    and isinstance(message_id, str)
-                    and message_id
-                    and isinstance(body, str)
-                    and body.strip()
-                ):
-                    yield sender, message_id, body.strip()
+    sender = payload.get('from')
+    message_id = payload.get('id')
+    text = payload.get('text')
+    if (
+        isinstance(sender, str)
+        and sender
+        and isinstance(message_id, str)
+        and message_id
+        and isinstance(text, str)
+        and text.strip()
+    ):
+        yield sender, message_id, text.strip()

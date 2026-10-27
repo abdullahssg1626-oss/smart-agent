@@ -23,7 +23,7 @@ def home(_request):
     return JsonResponse({
         'status': 'ok',
         'service': 'whatsapp-business-agent',
-        'webhook': '/webhook/whatsapp/',
+        'webhook': '/webhook/baileys/',
     })
 
 

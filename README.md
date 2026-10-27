@@ -1,65 +1,66 @@
 # WhatsApp Business Agent
 
-Django webhook that receives WhatsApp text messages, generates replies with
-Groq, and sends them through the WhatsApp Cloud API.
+Django receives messages from a persistent Baileys bridge, generates replies
+with Groq, and asks the bridge to send them over WhatsApp. Baileys requires a
+long-running Node.js process and persistent session storage; it cannot run as a
+serverless function.
 
-## Deploy to Vercel
+## Configure Django
 
-1. Push this project to GitHub. Keep `.env` out of Git; `.gitignore` excludes it.
-2. Import the repository into Vercel and leave **Root Directory** set to the
-   folder containing `manage.py`.
-3. Add these environment variables in **Vercel → Project Settings → Environment
-   Variables**. Do not upload the local `.env` file:
+Copy `.env.example` to `.env` and set:
 
-   - `DJANGO_SECRET_KEY`
-   - `WHATSAPP_VERIFY_TOKEN`
-   - `WHATSAPP_ACCESS_TOKEN`
-   - `WHATSAPP_PHONE_NUMBER_ID`
-   - `WHATSAPP_APP_SECRET`
-   - `GROQ_API_KEY`
-   - `DATABASE_URL` (a persistent PostgreSQL connection URL; required for saved conversation memory)
-   - `DJANGO_DEBUG` = `false`
-   - `WHATSAPP_GRAPH_API_VERSION` = `v23.0` (or the Graph API version you use)
-   - `GROQ_MODEL` = `llama-3.3-70b-versatile` (or a model enabled for your Groq account)
-
-   `DJANGO_ALLOWED_HOSTS` is optional if using Vercel-provided domains. For a
-   custom domain, set it to the comma-separated host names.
-4. Deploy the project. In Meta's webhook settings, use
-   `https://<your-vercel-domain>/webhook/whatsapp/` as the callback URL and use
-   the same `WHATSAPP_VERIFY_TOKEN` configured in Vercel. Subscribe to the
-   `messages` webhook field.
-
-Vercel runs this Django app as a serverless function. Create a persistent
-PostgreSQL database and set its connection URL as `DATABASE_URL`; Vercel's local
-filesystem and SQLite database are not persistent. To create the database
-tables, set the PostgreSQL URL as `DATABASE_URL` in your local `.env` file and
-run the migration command from this project folder:
-
-```powershell
-.\venv\Scripts\python.exe manage.py migrate
-```
-
-Use the same database URL in Vercel's environment variables. Never share or
-commit this URL; it contains database credentials.
-
-Each phone number has a stored conversation history. The last 20 completed
-message/reply pairs are passed to Groq through LangChain. This is contextual
-memory, not model training; the agent does not learn new business facts unless
-you add them to its system prompt or a knowledge base.
+- `DJANGO_SECRET_KEY` to a long random value.
+- `WHATSAPP_BRIDGE_URL` to the private or HTTPS URL of the bridge.
+- `WHATSAPP_BRIDGE_TOKEN` to a long random secret shared with the bridge.
+- `GROQ_API_KEY` and, optionally, `GROQ_MODEL`.
+- `DATABASE_URL` to persistent PostgreSQL in production. A blank value uses
+  SQLite locally.
 
 ## Run locally
 
-Create a `.env` file using `.env.example`, fill in the required values, then run:
+1. Install Node.js 20 or newer. In `baileys_bridge`, copy `.env.example` to
+   `.env` and set `WHATSAPP_BRIDGE_TOKEN` to the same value as Django's.
+   `DJANGO_WEBHOOK_URL` should point to the Django server's
+   `/webhook/baileys/` route.
+2. Install and start the bridge:
 
-```powershell
-.\venv\Scripts\python.exe manage.py runserver
-```
+   ```powershell
+   cd .\baileys_bridge
+   npm install
+   npm start
+   ```
 
-Locally, a blank `DATABASE_URL` uses SQLite. Create tables before the first run:
+3. Scan the QR code shown in the bridge terminal using WhatsApp's linked-device
+   settings. Session credentials are saved in `baileys_bridge/auth_info/`; keep
+   that folder private and persistent.
+4. In another terminal, from the project root, install the Python dependencies,
+   migrate the database, and start Django:
+
+   ```powershell
+   .\venv\Scripts\python.exe manage.py migrate
+   .\venv\Scripts\python.exe manage.py runserver
+   ```
+
+The bridge's `/health` endpoint reports whether its WhatsApp connection is
+open. Django's incoming endpoint is `/webhook/baileys/`; it only accepts
+requests authenticated with the shared bearer token.
+
+## Production deployment
+
+Run the Baileys bridge as a persistent Node.js service with a persistent volume
+for `baileys_bridge/auth_info/`. Configure its environment from
+`baileys_bridge/.env.example`. Set Django's `WHATSAPP_BRIDGE_URL` to the
+bridge's reachable `/` base URL and configure the same
+`WHATSAPP_BRIDGE_TOKEN` in both services. Keep the bridge endpoint private or
+behind HTTPS and network access controls; do not expose an unauthenticated
+plain-HTTP endpoint to the internet.
+
+Deploy Django with persistent PostgreSQL and set `DATABASE_URL` to its
+connection URL, then run migrations:
 
 ```powershell
 .\venv\Scripts\python.exe manage.py migrate
 ```
 
-The webhook route is `/webhook/whatsapp/`. Never upload `.env` or its secret
-values to GitHub; add them to the Vercel project environment instead.
+Conversation history stores the last 20 completed message/reply pairs for
+Groq context. This is contextual memory, not model training.
