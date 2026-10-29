@@ -1,30 +1,22 @@
-const crypto = require('node:crypto');
-const fs = require('node:fs');
 const http = require('node:http');
-const path = require('node:path');
-const pino = require('pino');
-const qrcode = require('qrcode-terminal');
-const baileys = require('@whiskeysockets/baileys');
+const crypto = require('node:crypto');
+const { create } = require('@open-wa/wa-automate');
 
-const makeWASocket = baileys.default;
-const { DisconnectReason, useMultiFileAuthState } = baileys;
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 const token = process.env.WHATSAPP_BRIDGE_TOKEN || '';
 const djangoWebhookSetting = process.env.DJANGO_WEBHOOK_URL || '';
 const djangoWebhookUrl = djangoWebhookSetting
   ? new URL(
-    /^https?:\/\//i.test(djangoWebhookSetting)
-      ? djangoWebhookSetting
-      : `https://${djangoWebhookSetting}`,
-  )
+      /^https?:\/\//i.test(djangoWebhookSetting)
+        ? djangoWebhookSetting
+        : `https://${djangoWebhookSetting}`,
+    )
   : null;
-const authDirectory = path.resolve(__dirname, process.env.AUTH_DIRECTORY || 'auth_info');
-const port = Number(process.env.PORT || 3001);
+const port = Number(process.env.PORT || 3000);
 const host = process.env.HOST || '0.0.0.0';
 const maxBodyBytes = 16 * 1024;
-let socket;
+
+let waClient = null;
 let connected = false;
-let reconnectTimer;
 
 if (!token || !djangoWebhookUrl || !Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error('Set WHATSAPP_BRIDGE_TOKEN, DJANGO_WEBHOOK_URL, and a valid PORT.');
@@ -72,9 +64,8 @@ function sendJson(response, status, payload) {
 function normalizeRecipient(value) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const recipient = value.trim();
-  if (/^\d{5,15}$/.test(recipient)) return `${recipient}@s.whatsapp.net`;
-  if (/^\d{5,15}@s\.whatsapp\.net$/.test(recipient)) return recipient;
-  if (/^\d{5,27}@lid$/.test(recipient)) return recipient;
+  if (/^\d{5,15}$/.test(recipient)) return `${recipient}@c.us`;
+  if (/^\d{5,15}@c\.us$/.test(recipient)) return recipient;
   return null;
 }
 
@@ -105,37 +96,28 @@ const server = http.createServer(async (request, response) => {
   if (!recipient || typeof payload.message !== 'string' || !payload.message.trim()) {
     return sendJson(response, 400, { error: 'A valid individual recipient and message are required.' });
   }
-  if (!connected || !socket) {
-    return sendJson(response, 503, { error: 'Baileys is not connected to WhatsApp.' });
+  if (!connected || !waClient) {
+    return sendJson(response, 503, { error: 'OpenWA is not connected to WhatsApp.' });
   }
 
   try {
-    const result = await socket.sendMessage(recipient, {
-      text: payload.message.slice(0, 4096),
-    });
-    return sendJson(response, 200, { id: result.key.id });
+    const result = await waClient.sendText(recipient, payload.message.slice(0, 4096));
+    return sendJson(response, 200, { id: result });
   } catch (error) {
-    logger.error({ err: error }, 'Could not send WhatsApp message.');
+    console.error('Could not send WhatsApp message:', error);
     return sendJson(response, 502, { error: 'Could not send WhatsApp message.' });
   }
 });
 
 async function forwardIncomingMessage(message) {
-  const remoteJid = message.key?.remoteJid;
-  if (
-    message.key?.fromMe
-    || !message.key?.id
-    || !remoteJid
-    || remoteJid === 'status@broadcast'
-    || remoteJid.endsWith('@g.us')
-  ) return;
-
-  const content = message.message;
-  const text = content?.conversation
-    || content?.extendedTextMessage?.text
-    || content?.imageMessage?.caption
-    || content?.videoMessage?.caption;
+  if (message.fromMe || message.isGroupMsg || !message.chatId) return;
+  const text = message.body || message.caption;
   if (typeof text !== 'string' || !text.trim()) return;
+
+  // Format JID to match Django backend expectations (@s.whatsapp.net)
+  const remoteJid = message.from.includes('@c.us') 
+    ? message.from.replace('@c.us', '@s.whatsapp.net') 
+    : `${message.from.replace(/@.*/, '')}@s.whatsapp.net`;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -145,7 +127,11 @@ async function forwardIncomingMessage(message) {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ id: message.key.id, from: remoteJid, text: text.trim() }),
+        body: JSON.stringify({ 
+          id: message.id, 
+          from: remoteJid, 
+          text: text.trim() 
+        }),
         signal: AbortSignal.timeout(15000),
       });
       if (response.ok) return;
@@ -158,66 +144,29 @@ async function forwardIncomingMessage(message) {
   }
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = undefined;
-    connect().catch((error) => {
-      logger.error({ err: error }, 'Baileys reconnect failed.');
-      scheduleReconnect();
-    });
-  }, 3000);
-}
+create({
+  sessionId: 'smart-agent',
+  multiDevice: true,
+  authTimeout: 60,
+  blockCrashLogs: true,
+  qrTimeout: 0,
+  cacheEnabled: false,
+}).then(async (client) => {
+  waClient = client;
+  connected = true;
+  console.log('OpenWA connected to WhatsApp successfully.');
 
-async function connect() {
-  fs.mkdirSync(authDirectory, { recursive: true });
-  const { state, saveCreds } = await useMultiFileAuthState(authDirectory);
-  socket = makeWASocket({
-    auth: state,
-    logger: pino({ level: 'silent' }),
-    printQRInTerminal: false,
-  });
-  socket.ev.on('creds.update', saveCreds);
-  socket.ev.on('connection.update', ({ connection, lastDisconnect, qr }) => {
-    if (qr) qrcode.generate(qr, { small: true });
-    if (connection === 'open') {
-      connected = true;
-      logger.info('Baileys connected to WhatsApp.');
-    } else if (connection === 'close') {
-      connected = false;
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      logger.warn({ statusCode }, 'Baileys connection closed.');
-      if (statusCode !== DisconnectReason.loggedOut) {
-        scheduleReconnect();
-      } else {
-        logger.error('WhatsApp session logged out; remove the auth directory and scan a new QR code.');
-      }
+  client.onMessage(async (message) => {
+    try {
+      await forwardIncomingMessage(message);
+    } catch (error) {
+      console.error('Could not forward incoming WhatsApp message to Django:', error);
     }
   });
-  socket.ev.on('messages.upsert', ({ type, messages }) => {
-    if (type !== 'notify') return;
-    for (const message of messages) {
-      forwardIncomingMessage(message).catch((error) => {
-        logger.error({ err: error }, 'Could not forward incoming WhatsApp message to Django.');
-      });
-    }
-  });
-}
-
-server.listen(port, host, () => {
-  logger.info({ host, port }, 'Baileys bridge HTTP server listening.');
-  connect().catch((error) => {
-    logger.error({ err: error }, 'Baileys startup failed.');
-    scheduleReconnect();
-  });
+}).catch((error) => {
+  console.error('OpenWA initialization failed:', error);
 });
 
-function shutdown() {
-  connected = false;
-  clearTimeout(reconnectTimer);
-  server.close(() => process.exit(0));
-  if (socket) socket.end(undefined);
-}
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+server.listen(port, host, () => {
+  console.log(`OpenWA bridge HTTP server listening on ${host}:${port}`);
+});

@@ -40,6 +40,7 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'false' if os.getenv('VERCEL') else 'true').lo
 ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
+    'clear-drinks-grin.loca.lt',
     *filter(
         None,
         (
