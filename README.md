@@ -1,85 +1,60 @@
 # WhatsApp Business Agent
 
-Django receives messages from a persistent Baileys bridge, generates replies
-with Groq, and asks the bridge to send them over WhatsApp. Baileys requires a
-long-running Node.js process and persistent session storage; it cannot run as a
-serverless function.
+Django receives signed OpenWA webhooks, generates replies with Groq, and sends
+them through the OpenWA REST API. The Django webhook endpoint is
+`/api/webhook/`.
 
 ## Configure Django
 
-Copy `.env.example` to `.env` and set:
+Copy `.env.example` to `.env` and configure:
 
-- `DJANGO_SECRET_KEY` to a long random value.
-- `WHATSAPP_BRIDGE_URL` to the private or HTTPS URL of the bridge.
-- `WHATSAPP_BRIDGE_TOKEN` to a long random secret shared with the bridge.
-- `GROQ_API_KEY` and, optionally, `GROQ_MODEL`.
-- `DATABASE_URL` to persistent PostgreSQL in production. A blank value uses
+- `DJANGO_SECRET_KEY` and `GROQ_API_KEY`.
+- `OPENWA_API_URL`, normally `http://127.0.0.1:2785/api` for local Docker.
+- `OPENWA_API_KEY` using an OpenWA API key with permission to send messages.
+- `OPENWA_SESSION_ID` for the WhatsApp session to use.
+- `OPENWA_WEBHOOK_SECRET` with a random value at least 16 characters long.
+- `DATABASE_URL` for persistent PostgreSQL in production. A blank value uses
   SQLite locally.
+- `DJANGO_ALLOWED_HOSTS`, including `.ngrok-free.dev` when using an ngrok
+  domain.
 
 ## Run locally
 
-1. Install Node.js 20 or newer. In `baileys_bridge`, copy `.env.example` to
-   `.env` and set `WHATSAPP_BRIDGE_TOKEN` to the same value as Django's.
-   `DJANGO_WEBHOOK_URL` should point to the Django server's
-   `/webhook/baileys/` route.
-2. Install and start the bridge:
+1. Start OpenWA from its included Docker project:
 
    ```powershell
-   cd .\baileys_bridge
-   npm install
-   npm start
+   cd .\baileys_bridge\OpenWA
+   docker compose -f docker-compose.dev.yml up -d
    ```
 
-3. Scan the QR code shown in the bridge terminal using WhatsApp's linked-device
-   settings. Session credentials are saved in `baileys_bridge/auth_info/`; keep
-   that folder private and persistent.
-4. In another terminal, from the project root, install the Python dependencies,
-   migrate the database, and start Django:
+   OpenWA's API and dashboard are available at `http://localhost:2785`. Create
+   and start a WhatsApp session, then set the API key and session ID in the
+   Django `.env`.
+
+2. Run Django from the project root:
 
    ```powershell
    .\venv\Scripts\python.exe manage.py migrate
    .\venv\Scripts\python.exe manage.py runserver
    ```
 
-The bridge's `/health` endpoint reports whether its WhatsApp connection is
-open. Django's incoming endpoint is `/webhook/baileys/`; it only accepts
-requests authenticated with the shared bearer token.
+3. Configure an OpenWA webhook for the session. Subscribe to
+   `message.received`, set its secret to the same `OPENWA_WEBHOOK_SECRET`, and
+   point its URL to `https://<your-ngrok-domain>.ngrok-free.dev/api/webhook/`.
+   The ngrok domain must be included in `DJANGO_ALLOWED_HOSTS`.
 
-## Deploy the free Render setup
+OpenWA signs each webhook's raw JSON body with HMAC-SHA256. Django verifies the
+`X-OpenWA-Signature` header before parsing or processing the event. Replies use
+OpenWA's `/sessions/{sessionId}/messages/send-text` endpoint and `X-API-Key`.
 
-1. Push the repository to GitHub and select **New → Blueprint** in Render.
-   Connect the repository and let Render read the root `render.yaml`.
-2. Enter your `GROQ_API_KEY` when prompted, then create the Blueprint. It
-   creates the Django web service, public Baileys bridge, shared random bridge
-   token, and a free PostgreSQL database in Oregon.
-3. Open the `whatsapp-baileys` service logs and scan its QR code with WhatsApp
-   linked-device settings. The bridge calls Django at its Render URL and Django
-   sends replies back to the bridge.
+## Deployment
 
-This free configuration is for testing, not reliable always-on use. Render
-free web services spin down after 15 minutes without inbound traffic and have
-ephemeral filesystems. The Baileys service can disconnect while asleep, and its
-WhatsApp login files can be lost when it restarts, so you may need to scan a
-new QR code. The free PostgreSQL database expires after 30 days; upgrade it
-before expiry to retain conversation history. Do not rely on this setup for
-production messaging.
-
-## Production deployment
-
-Run the Baileys bridge as a persistent Node.js service with a persistent volume
-for `baileys_bridge/auth_info/`. Configure its environment from
-`baileys_bridge/.env.example`. Set Django's `WHATSAPP_BRIDGE_URL` to the
-bridge's reachable `/` base URL and configure the same
-`WHATSAPP_BRIDGE_TOKEN` in both services. Keep the bridge endpoint private or
-behind HTTPS and network access controls; do not expose an unauthenticated
-plain-HTTP endpoint to the internet.
-
-Deploy Django with persistent PostgreSQL and set `DATABASE_URL` to its
-connection URL, then run migrations:
-
-```powershell
-.\venv\Scripts\python.exe manage.py migrate
-```
+The Render blueprint provisions Django and PostgreSQL only. OpenWA must run
+separately in Docker or another persistent environment. Configure the Render
+service's `OPENWA_API_URL`, `OPENWA_API_KEY`, `OPENWA_SESSION_ID`, and
+`OPENWA_WEBHOOK_SECRET` to reach that OpenWA instance, and configure its
+webhook URL to the Django deployment's `/api/webhook/` endpoint. Use HTTPS for
+public webhook URLs and keep API keys and webhook secrets private.
 
 Conversation history stores the last 20 completed message/reply pairs for
 Groq context. This is contextual memory, not model training.

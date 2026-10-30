@@ -1,14 +1,14 @@
 {
   "builds": [
     {
-      "src": "smart_agent/wsgi.py",
+      "src": "whatsapp_bot/wsgi.py",
       "use": "@vercel/python"
     }
   ],
   "routes": [
     {
       "src": "/(.*)",
-      "dest": "smart_agent/wsgi.py"
+      "dest": "whatsapp_bot/wsgi.py"
     }
   ]
 }

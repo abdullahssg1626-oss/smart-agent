@@ -23,12 +23,12 @@ def home(_request):
     return JsonResponse({
         'status': 'ok',
         'service': 'whatsapp-business-agent',
-        'webhook': '/webhook/baileys/',
+        'webhook': '/api/webhook/',
     })
 
 
 urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
-    path('webhook/', include('messaging.urls')),
+    path('api/', include('messaging.urls')),
 ]

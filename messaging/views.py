@@ -1,3 +1,4 @@
+import hashlib
 import hmac
 import json
 import logging
@@ -24,12 +25,19 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 @require_http_methods(['POST'])
 def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
-    bridge_token = settings.WHATSAPP_BRIDGE_TOKEN
-    if not bridge_token or not hmac.compare_digest(
-        request.headers.get('Authorization', ''),
-        f'Bearer {bridge_token}',
-    ):
-        return JsonResponse({'error': 'Invalid bridge credentials.'}, status=403)
+    webhook_secret = settings.OPENWA_WEBHOOK_SECRET
+    if not webhook_secret:
+        logger.error('OpenWA webhook is unavailable because OPENWA_WEBHOOK_SECRET is missing.')
+        return JsonResponse({'error': 'OpenWA webhook secret is not configured.'}, status=503)
+
+    signature = request.headers.get('X-OpenWA-Signature', '')
+    expected_signature = 'sha256=' + hmac.new(
+        webhook_secret.encode('utf-8'),
+        request.body,
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(signature, expected_signature):
+        return JsonResponse({'error': 'Invalid OpenWA webhook signature.'}, status=403)
 
     if settings.VERCEL_DEPLOYMENT and not settings.DATABASE_URL:
         logger.error('WhatsApp webhook is unavailable because DATABASE_URL is missing.')
@@ -46,16 +54,21 @@ def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
         return JsonResponse({'error': 'Request body must be a JSON object.'}, status=400)
 
     try:
-        for sender, message_id, text in iter_incoming_text_messages(payload):
+        for incoming_message in iter_incoming_text_messages(payload):
+            conversation_id = (
+                incoming_message.chat_id
+                if incoming_message.is_group
+                else incoming_message.sender_id
+            )
             with transaction.atomic():
                 conversation, _ = Conversation.objects.get_or_create(
-                    phone_number=sender,
+                    phone_number=conversation_id,
                 )
                 turn, _ = ConversationTurn.objects.get_or_create(
-                    whatsapp_message_id=message_id,
+                    whatsapp_message_id=incoming_message.message_id,
                     defaults={
                         'conversation': conversation,
-                        'user_message': text,
+                        'user_message': incoming_message.text,
                     },
                 )
                 turn = ConversationTurn.objects.select_for_update().get(pk=turn.pk)
@@ -89,7 +102,7 @@ def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
                     turn.save(update_fields=('assistant_message', 'updated_at'))
 
             try:
-                send_whatsapp_message(sender, reply)
+                send_whatsapp_message(incoming_message.chat_id, reply)
             except IntegrationError:
                 ConversationTurn.objects.filter(pk=turn.pk).update(
                     status=ConversationTurn.Status.FAILED,
@@ -100,6 +113,6 @@ def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
             turn.save(update_fields=('status', 'updated_at'))
     except IntegrationError:
         logger.exception('WhatsApp webhook could not process an incoming message.')
-        return JsonResponse({'error': 'Message processing failed; the bridge may retry.'}, status=502)
+        return JsonResponse({'error': 'Message processing failed; OpenWA may retry.'}, status=502)
 
     return JsonResponse({'status': 'ok'})

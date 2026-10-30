@@ -41,8 +41,7 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     'clear-drinks-grin.loca.lt',
-    '.ngrok-free.dev',  # Ngrok ki tamam free domains ko allow karne ke liye
-    'dragging-envision-pep.ngrok-free.dev',
+    '.ngrok-free.dev',
     *filter(
         None,
         (
@@ -185,8 +184,10 @@ MAILERS = {
     },
 }
 
-WHATSAPP_BRIDGE_URL = os.getenv('WHATSAPP_BRIDGE_URL', 'http://127.0.0.1:3001')
-WHATSAPP_BRIDGE_TOKEN = os.getenv('WHATSAPP_BRIDGE_TOKEN', '')
+OPENWA_API_URL = os.getenv('OPENWA_API_URL', 'http://127.0.0.1:2785/api')
+OPENWA_API_KEY = os.getenv('OPENWA_API_KEY', '')
+OPENWA_SESSION_ID = os.getenv('OPENWA_SESSION_ID', '')
+OPENWA_WEBHOOK_SECRET = os.getenv('OPENWA_WEBHOOK_SECRET', '')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
 AGENT_SYSTEM_PROMPT = os.getenv(

@@ -1,8 +1,10 @@
 import json
 import logging
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from django.conf import settings
@@ -21,12 +23,21 @@ class IntegrationError(Exception):
     pass
 
 
-def _post_json(url: str, payload: dict[str, Any], access_token: str) -> dict[str, Any]:
+@dataclass(frozen=True)
+class IncomingTextMessage:
+    sender_id: str
+    chat_id: str
+    message_id: str
+    text: str
+    is_group: bool
+
+
+def _post_json(url: str, payload: dict[str, Any], api_key: str) -> dict[str, Any]:
     request = Request(
         url,
         data=json.dumps(payload).encode('utf-8'),
         headers={
-            'Authorization': f'Bearer {access_token}',
+            'X-API-Key': api_key,
             'Content-Type': 'application/json',
         },
         method='POST',
@@ -88,30 +99,67 @@ def generate_reply(conversation: Conversation, turn: ConversationTurn) -> str:
 
 
 def send_whatsapp_message(recipient: str, message: str) -> None:
-    if not settings.WHATSAPP_BRIDGE_URL or not settings.WHATSAPP_BRIDGE_TOKEN:
-        raise IntegrationError('WhatsApp Baileys bridge is not configured.')
-    bridge_url = settings.WHATSAPP_BRIDGE_URL.rstrip('/')
-    if not bridge_url.startswith(('http://', 'https://')):
-        bridge_url = f'https://{bridge_url}'
+    if not settings.OPENWA_API_URL or not settings.OPENWA_API_KEY or not settings.OPENWA_SESSION_ID:
+        raise IntegrationError('OpenWA API URL, API key, and session ID must be configured.')
+    api_url = settings.OPENWA_API_URL.rstrip('/')
+    if not api_url.startswith(('http://', 'https://')):
+        api_url = f'http://{api_url}'
+    chat_id = recipient.strip()
+    if '@' not in chat_id:
+        chat_id = f'{chat_id}@c.us'
+    session_id = quote(settings.OPENWA_SESSION_ID, safe='')
     _post_json(
-        f'{bridge_url}/messages',
-        {'to': recipient, 'message': message[:4096]},
-        settings.WHATSAPP_BRIDGE_TOKEN,
+        f'{api_url}/sessions/{session_id}/messages/send-text',
+        {'chatId': chat_id, 'text': message[:4096]},
+        settings.OPENWA_API_KEY,
     )
 
 
 def iter_incoming_text_messages(
     payload: dict[str, Any],
-) -> Iterator[tuple[str, str, str]]:
-    sender = payload.get('from')
-    message_id = payload.get('id')
-    text = payload.get('text')
+) -> Iterator[IncomingTextMessage]:
+    if payload.get('event') != 'message.received':
+        return
+    message = payload.get('data')
+    if not isinstance(message, dict):
+        return
+    kind = message.get('kind')
+    if (
+        message.get('fromMe') is True
+        or message.get('isStatusBroadcast') is True
+        or kind == 'status'
+        or kind == 'broadcast'
+    ):
+        return
+
+    sender = (
+        message.get('senderPhone')
+        or message.get('author')
+        or message.get('sender')
+        or message.get('from')
+    )
+    chat_id = message.get('chatId') or message.get('from') or sender
+    message_id = message.get('id') or message.get('messageId')
+    text = message.get('body') or message.get('content')
     if (
         isinstance(sender, str)
         and sender
+        and isinstance(chat_id, str)
+        and chat_id
         and isinstance(message_id, str)
         and message_id
         and isinstance(text, str)
         and text.strip()
     ):
-        yield sender, message_id, text.strip()
+        is_group = (
+            message.get('isGroup') is True
+            or kind == 'group'
+            or chat_id.endswith('@g.us')
+        )
+        yield IncomingTextMessage(
+            sender_id=sender,
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text.strip(),
+            is_group=is_group,
+        )
