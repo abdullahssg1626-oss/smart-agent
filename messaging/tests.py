@@ -21,7 +21,12 @@ from .services import (
 @override_settings(OPENWA_WEBHOOK_SECRET='openwa-test-secret')
 class WhatsAppWebhookTests(TestCase):
     @staticmethod
-    def post_openwa_message(client, message_id='openwa.message-1'):
+    def post_openwa_message(
+        client,
+        message_id='openwa.message-1',
+        signature_header=None,
+        include_signature=True,
+    ):
         body = json.dumps({
             'event': 'message.received',
             'timestamp': '2026-10-30T12:00:00.000Z',
@@ -42,11 +47,14 @@ class WhatsAppWebhookTests(TestCase):
         signature = 'sha256=' + hmac.new(
             b'openwa-test-secret', body, hashlib.sha256,
         ).hexdigest()
+        headers = {}
+        if include_signature:
+            headers['HTTP_X_OPENWA_SIGNATURE'] = signature_header or signature
         return client.post(
             '/api/webhook/',
             data=body,
             content_type='application/json',
-            HTTP_X_OPENWA_SIGNATURE=signature,
+            **headers,
         )
 
     def test_home_page_reports_service_status_and_webhook_path(self):
@@ -74,6 +82,37 @@ class WhatsAppWebhookTests(TestCase):
         self.assertEqual(turn.conversation.phone_number, '15551234567@c.us')
         self.assertEqual(turn.assistant_message, 'Hello!')
         self.assertEqual(turn.status, ConversationTurn.Status.REPLIED)
+        send_mock.assert_called_once_with('15551234567@c.us', 'Hello!')
+
+    @override_settings(OPENWA_WEBHOOK_SECRET='', DEBUG=False)
+    @patch('messaging.views.send_whatsapp_message')
+    @patch('messaging.views.generate_reply', return_value='Hello!')
+    def test_openwa_message_without_configured_secret_returns_200(
+        self,
+        generate_reply_mock,
+        send_mock,
+    ):
+        response = self.post_openwa_message(self.client, include_signature=False)
+
+        self.assertEqual(response.status_code, 200)
+        generate_reply_mock.assert_called_once()
+        send_mock.assert_called_once_with('15551234567@c.us', 'Hello!')
+
+    @override_settings(DEBUG=True)
+    @patch('messaging.views.send_whatsapp_message')
+    @patch('messaging.views.generate_reply', return_value='Hello!')
+    def test_debug_mode_skips_invalid_openwa_signature(
+        self,
+        generate_reply_mock,
+        send_mock,
+    ):
+        response = self.post_openwa_message(
+            self.client,
+            signature_header='sha256=invalid',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        generate_reply_mock.assert_called_once()
         send_mock.assert_called_once_with('15551234567@c.us', 'Hello!')
 
     @patch('messaging.views.send_whatsapp_message')
@@ -113,7 +152,8 @@ class WhatsAppWebhookTests(TestCase):
         generate_reply_mock.assert_called_once()
         self.assertEqual(send_mock.call_count, 2)
 
-    def test_invalid_openwa_signature_is_rejected(self):
+    @override_settings(DEBUG=False)
+    def test_invalid_openwa_signature_is_rejected_in_production(self):
         response = self.client.post(
             '/api/webhook/',
             data='{}',
