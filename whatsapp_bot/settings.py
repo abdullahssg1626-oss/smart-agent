@@ -41,6 +41,8 @@ ALLOWED_HOSTS = [
     'localhost',
     '127.0.0.1',
     'clear-drinks-grin.loca.lt',
+    '.ngrok-free.dev',  # Ngrok ki tamam free domains ko allow karne ke liye
+    'dragging-envision-pep.ngrok-free.dev',
     *filter(
         None,
         (
@@ -54,8 +56,6 @@ ALLOWED_HOSTS = [
         ),
     ),
 ]
-
-
 # Application definition
 
 INSTALLED_APPS = [
