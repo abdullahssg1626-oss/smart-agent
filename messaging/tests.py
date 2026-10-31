@@ -3,9 +3,12 @@ import hmac
 import json
 from unittest.mock import patch
 
+from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, TransactionTestCase, override_settings
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
+
+from whatsapp_bot.settings import _configured_host_values
 
 from .history import DjangoChatMessageHistory
 from .models import Conversation, ConversationTurn
@@ -16,6 +19,37 @@ from .services import (
     iter_incoming_text_messages,
     send_whatsapp_message,
 )
+
+
+class AllowedHostConfigurationTests(TestCase):
+    def test_normalizes_hostnames_urls_and_wildcards_for_django(self):
+        hosts, origins = _configured_host_values([
+            'Example.com',
+            'https://api.example.com/',
+            '.ngrok-free.dev',
+            'https://*.preview.example.com:8443',
+        ])
+
+        self.assertEqual(
+            hosts,
+            ['example.com', 'api.example.com', '.ngrok-free.dev', '.preview.example.com'],
+        )
+        self.assertEqual(
+            origins,
+            [
+                'https://example.com',
+                'https://api.example.com',
+                'https://ngrok-free.dev',
+                'https://*.ngrok-free.dev',
+                'https://preview.example.com:8443',
+                'https://*.preview.example.com:8443',
+            ],
+        )
+
+    def test_rejects_host_values_with_paths_or_invalid_schemes(self):
+        for value in ('https://example.com/path', 'ftp://example.com', 'example.com:invalid'):
+            with self.subTest(value=value), self.assertRaises(ImproperlyConfigured):
+                _configured_host_values([value])
 
 
 @override_settings(OPENWA_WEBHOOK_SECRET='openwa-test-secret')
@@ -85,18 +119,20 @@ class WhatsAppWebhookTests(TestCase):
         send_mock.assert_called_once_with('15551234567@c.us', 'Hello!')
 
     @override_settings(OPENWA_WEBHOOK_SECRET='', DEBUG=False)
-    @patch('messaging.views.send_whatsapp_message')
-    @patch('messaging.views.generate_reply', return_value='Hello!')
-    def test_openwa_message_without_configured_secret_returns_200(
-        self,
-        generate_reply_mock,
-        send_mock,
-    ):
+    def test_openwa_message_without_configured_secret_is_unavailable(self):
         response = self.post_openwa_message(self.client, include_signature=False)
 
-        self.assertEqual(response.status_code, 200)
-        generate_reply_mock.assert_called_once()
-        send_mock.assert_called_once_with('15551234567@c.us', 'Hello!')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            response.json(),
+            {'error': 'Webhook authentication is not configured for this deployment.'},
+        )
+
+    @override_settings(OPENWA_WEBHOOK_SECRET='short', DEBUG=False)
+    def test_openwa_message_with_short_secret_is_unavailable(self):
+        response = self.post_openwa_message(self.client)
+
+        self.assertEqual(response.status_code, 503)
 
     @override_settings(DEBUG=True)
     @patch('messaging.views.send_whatsapp_message')

@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 
 from pathlib import Path
 import os
+from urllib.parse import urlsplit
 
 import dj_database_url
 from dotenv import load_dotenv
@@ -37,24 +38,70 @@ DEBUG = os.getenv('DJANGO_DEBUG', 'false' if os.getenv('VERCEL') else 'true').lo
     'yes',
 }
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    'clear-drinks-grin.loca.lt',
-    '.ngrok-free.dev',
-    *filter(
-        None,
-        (
-            os.getenv('VERCEL_URL'),
-            os.getenv('VERCEL_PROJECT_PRODUCTION_URL'),
-            *(
-                host.strip()
-                for host in os.getenv('DJANGO_ALLOWED_HOSTS', '').split(',')
-                if host.strip()
-            ),
-        ),
-    ),
-]
+
+def _configured_host_values(values: list[str]) -> tuple[list[str], list[str]]:
+    hosts = []
+    csrf_origins = []
+    for value in values:
+        value = value.strip()
+        if not value:
+            continue
+        parsed = urlsplit(value if '://' in value else f'//{value}')
+        if parsed.scheme and parsed.scheme.lower() not in {'http', 'https'}:
+            raise ImproperlyConfigured(f'Unsupported host URL scheme: {parsed.scheme}')
+        if (
+            not parsed.netloc
+            or parsed.username
+            or parsed.password
+            or parsed.path not in {'', '/'}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ImproperlyConfigured(f'Invalid host configuration: {value}')
+        try:
+            hostname = parsed.hostname
+            port = parsed.port
+        except ValueError as exc:
+            raise ImproperlyConfigured(f'Invalid host configuration: {value}') from exc
+        if not hostname:
+            raise ImproperlyConfigured(f'Invalid host configuration: {value}')
+        if (hostname.startswith('*.') and '*' in hostname[2:]) or (
+            not hostname.startswith('*.') and '*' in hostname
+        ):
+            raise ImproperlyConfigured(f'Invalid host configuration: {value}')
+
+        hostname = hostname.lower().rstrip('.')
+        if not hostname:
+            raise ImproperlyConfigured(f'Invalid host configuration: {value}')
+        allowed_host = f'.{hostname[2:]}' if hostname.startswith('*.') else hostname
+        if ':' in hostname and not hostname.startswith('['):
+            allowed_host = f'[{allowed_host}]'
+        hosts.append(allowed_host)
+
+        scheme = parsed.scheme.lower() if parsed.scheme else 'https'
+        origin_port = port
+        if (scheme, port) in {('http', 80), ('https', 443)}:
+            origin_port = None
+        port_suffix = f':{origin_port}' if origin_port is not None else ''
+        if allowed_host.startswith('.'):
+            domain = allowed_host[1:]
+            csrf_origins.extend((
+                f'{scheme}://{domain}{port_suffix}',
+                f'{scheme}://*.{domain}{port_suffix}',
+            ))
+        else:
+            csrf_origins.append(f'{scheme}://{allowed_host}{port_suffix}')
+
+    return list(dict.fromkeys(hosts)), list(dict.fromkeys(csrf_origins))
+
+
+_configured_hosts, _configured_csrf_origins = _configured_host_values([
+    os.getenv('VERCEL_URL', ''),
+    os.getenv('VERCEL_PROJECT_PRODUCTION_URL', ''),
+    os.getenv('RENDER_EXTERNAL_HOSTNAME', ''),
+    *os.getenv('DJANGO_ALLOWED_HOSTS', '').split(','),
+])
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', *_configured_hosts]
 # Application definition
 
 INSTALLED_APPS = [
@@ -86,9 +133,9 @@ if not DEBUG:
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
     CSRF_TRUSTED_ORIGINS = [
-        f'https://{host}'
-        for host in ALLOWED_HOSTS
-        if host not in {'localhost', '127.0.0.1'}
+        origin
+        for origin in _configured_csrf_origins
+        if urlsplit(origin).hostname not in {'localhost', '127.0.0.1', '[::1]', '::1'}
     ]
 
 ROOT_URLCONF = 'whatsapp_bot.urls'
@@ -187,7 +234,7 @@ MAILERS = {
 OPENWA_API_URL = os.getenv('OPENWA_API_URL', 'http://127.0.0.1:2785/api')
 OPENWA_API_KEY = os.getenv('OPENWA_API_KEY', '')
 OPENWA_SESSION_ID = os.getenv('OPENWA_SESSION_ID', '')
-OPENWA_WEBHOOK_SECRET = os.getenv('OPENWA_WEBHOOK_SECRET', '')
+OPENWA_WEBHOOK_SECRET = os.getenv('OPENWA_WEBHOOK_SECRET', '').strip()
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
 GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
 AGENT_SYSTEM_PROMPT = os.getenv(

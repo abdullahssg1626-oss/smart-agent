@@ -26,7 +26,15 @@ logger = logging.getLogger(__name__)
 @require_http_methods(['POST'])
 def whatsapp_webhook(request: HttpRequest) -> HttpResponse:
     webhook_secret = settings.OPENWA_WEBHOOK_SECRET
-    if webhook_secret and not settings.DEBUG:
+    if not settings.DEBUG:
+        if len(webhook_secret) < 16:
+            logger.error(
+                'WhatsApp webhook is unavailable because its signing secret is missing or too short.',
+            )
+            return JsonResponse(
+                {'error': 'Webhook authentication is not configured for this deployment.'},
+                status=503,
+            )
         signature = request.headers.get('X-OpenWA-Signature', '')
         expected_signature = 'sha256=' + hmac.new(
             webhook_secret.encode('utf-8'),
