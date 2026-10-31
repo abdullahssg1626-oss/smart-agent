@@ -9,6 +9,8 @@ them through the OpenWA REST API. The Django webhook endpoint is
 Copy `.env.example` to `.env` and configure:
 
 - `DJANGO_SECRET_KEY` and `GROQ_API_KEY`.
+- `GROQ_MODEL` is optional; it defaults to `openai/gpt-oss-20b`. Set it to
+  another currently supported Groq model ID to override the default.
 - `OPENWA_API_URL`, normally `http://127.0.0.1:2785/api` for local Docker.
 - `OPENWA_API_KEY` using an OpenWA API key with permission to send messages.
 - `OPENWA_SESSION_ID` for the WhatsApp session to use.
@@ -18,8 +20,9 @@ Copy `.env.example` to `.env` and configure:
 - `DATABASE_URL` for persistent PostgreSQL in production. A blank value uses
   SQLite locally.
 - `DJANGO_ALLOWED_HOSTS`, as comma-separated hostnames (schemes and root paths
-  are also accepted). Add `.ngrok-free.dev` here when using an ngrok domain;
-  wildcard hosts are converted to valid Django CSRF trusted origins.
+  are also accepted). Localtunnel (`.loca.lt`) and ngrok (`.ngrok-free.app`
+  and `.ngrok-free.dev`) tunnel hostnames are allowed automatically, including
+  their dynamic subdomains; other custom domains can be added here.
 
 Vercel (`VERCEL_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) and Render
 (`RENDER_EXTERNAL_HOSTNAME`) deployment hostnames are added automatically.
@@ -46,9 +49,11 @@ Vercel (`VERCEL_URL`, `VERCEL_PROJECT_PRODUCTION_URL`) and Render
 
 3. Configure an OpenWA webhook for the session. Subscribe to
    `message.received`, set its secret to the same `OPENWA_WEBHOOK_SECRET`, and
-   point its URL to `https://<your-ngrok-domain>.ngrok-free.dev/api/webhook/`.
-   Include `.ngrok-free.dev` (or your exact tunnel hostname) in
-   `DJANGO_ALLOWED_HOSTS`.
+   point its URL to the current tunnel URL, for example
+   `https://<your-tunnel>.loca.lt/api/webhook/` or
+   `https://<your-tunnel>.ngrok-free.app/api/webhook/`. Tunnel subdomains are
+   allowed automatically, so they do not need to be updated in `.env` when
+   the tunnel domain changes.
 
 OpenWA signs each webhook's raw JSON body with HMAC-SHA256. Django verifies the
 `X-OpenWA-Signature` header before parsing or processing the event. Replies use

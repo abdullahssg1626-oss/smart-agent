@@ -3,6 +3,7 @@ import hmac
 import json
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.test import TestCase, TransactionTestCase, override_settings
 from langchain_core.messages import AIMessage
@@ -22,6 +23,18 @@ from .services import (
 
 
 class AllowedHostConfigurationTests(TestCase):
+    def test_dynamic_tunnel_hosts_are_allowed_without_wildcarding_all_hosts(self):
+        self.assertIn('.loca.lt', settings.ALLOWED_HOSTS)
+        self.assertIn('.ngrok-free.app', settings.ALLOWED_HOSTS)
+        self.assertNotIn('*', settings.ALLOWED_HOSTS)
+        self.assertIn('https://*.loca.lt', settings.CSRF_TRUSTED_ORIGINS)
+        self.assertIn('https://*.ngrok-free.app', settings.CSRF_TRUSTED_ORIGINS)
+
+    def test_request_from_a_new_localtunnel_subdomain_is_accepted(self):
+        response = self.client.get('/', HTTP_HOST='new-random-tunnel.loca.lt')
+
+        self.assertEqual(response.status_code, 200)
+
     def test_normalizes_hostnames_urls_and_wildcards_for_django(self):
         hosts, origins = _configured_host_values([
             'Example.com',
@@ -304,7 +317,7 @@ class GroqServiceTests(TransactionTestCase):
             [],
         )
 
-    @override_settings(GROQ_API_KEY='groq-key')
+    @override_settings(GROQ_API_KEY='groq-key', GROQ_MODEL='openai/gpt-oss-20b')
     def test_langchain_reply_uses_and_persists_conversation_history(self):
         conversation = Conversation.objects.create(phone_number='15551234567')
         first_turn = ConversationTurn.objects.create(
@@ -328,7 +341,7 @@ class GroqServiceTests(TransactionTestCase):
         self.assertEqual(first_reply, 'messages=2')
         self.assertEqual(first_turn.assistant_message, 'messages=2')
         self.assertEqual(first_turn.status, ConversationTurn.Status.PROCESSING)
-        self.assertEqual(chat_model.call_args.kwargs['model'], 'llama-3.1-8b-instant')
+        self.assertEqual(chat_model.call_args.kwargs['model'], 'openai/gpt-oss-20b')
 
         first_turn.status = ConversationTurn.Status.REPLIED
         first_turn.save(update_fields=('status',))

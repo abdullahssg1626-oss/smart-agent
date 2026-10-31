@@ -101,7 +101,24 @@ _configured_hosts, _configured_csrf_origins = _configured_host_values([
     os.getenv('RENDER_EXTERNAL_HOSTNAME', ''),
     *os.getenv('DJANGO_ALLOWED_HOSTS', '').split(','),
 ])
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', *_configured_hosts]
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '.loca.lt',
+    '.ngrok-free.app',
+    '.ngrok-free.dev',
+    *_configured_hosts,
+]
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.loca.lt',
+    'https://*.ngrok-free.app',
+    'https://*.ngrok-free.dev',
+    *(
+        origin
+        for origin in _configured_csrf_origins
+        if urlsplit(origin).hostname not in {'localhost', '127.0.0.1', '[::1]', '::1'}
+    ),
+]
 # Application definition
 
 INSTALLED_APPS = [
@@ -132,12 +149,6 @@ if not DEBUG:
     CSRF_COOKIE_SECURE = True
     SECURE_CONTENT_TYPE_NOSNIFF = True
     X_FRAME_OPTIONS = 'DENY'
-    CSRF_TRUSTED_ORIGINS = [
-        origin
-        for origin in _configured_csrf_origins
-        if urlsplit(origin).hostname not in {'localhost', '127.0.0.1', '[::1]', '::1'}
-    ]
-
 ROOT_URLCONF = 'whatsapp_bot.urls'
 
 TEMPLATES = [
@@ -236,7 +247,7 @@ OPENWA_API_KEY = os.getenv('OPENWA_API_KEY', '')
 OPENWA_SESSION_ID = os.getenv('OPENWA_SESSION_ID', '')
 OPENWA_WEBHOOK_SECRET = os.getenv('OPENWA_WEBHOOK_SECRET', '').strip()
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'openai/gpt-oss-20b')
 AGENT_SYSTEM_PROMPT = os.getenv(
     'AGENT_SYSTEM_PROMPT',
     'You are a helpful WhatsApp business assistant. Reply concisely in the '
