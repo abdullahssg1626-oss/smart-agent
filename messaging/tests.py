@@ -292,7 +292,7 @@ class GroqServiceTests(TransactionTestCase):
         self.assertEqual(first_reply, 'messages=2')
         self.assertEqual(first_turn.assistant_message, 'messages=2')
         self.assertEqual(first_turn.status, ConversationTurn.Status.PROCESSING)
-        self.assertEqual(chat_model.call_args.kwargs['model'], 'llama-3.3-70b-versatile')
+        self.assertEqual(chat_model.call_args.kwargs['model'], 'llama-3.1-8b-instant')
 
         first_turn.status = ConversationTurn.Status.REPLIED
         first_turn.save(update_fields=('status',))

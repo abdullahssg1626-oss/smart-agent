@@ -189,7 +189,7 @@ OPENWA_API_KEY = os.getenv('OPENWA_API_KEY', '')
 OPENWA_SESSION_ID = os.getenv('OPENWA_SESSION_ID', '')
 OPENWA_WEBHOOK_SECRET = os.getenv('OPENWA_WEBHOOK_SECRET', '')
 GROQ_API_KEY = os.getenv('GROQ_API_KEY', '')
-GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.3-70b-versatile')
+GROQ_MODEL = os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant')
 AGENT_SYSTEM_PROMPT = os.getenv(
     'AGENT_SYSTEM_PROMPT',
     'You are a helpful WhatsApp business assistant. Reply concisely in the '
